@@ -1,0 +1,24 @@
+# The Simpsons: Tapped Out host contract.
+#
+# Every JNI entry point the Android Java shell called to drive the engine:
+# lifecycle, a GL surface, a resize hook, a render tick, and pointer/key input.
+# A desktop host implements these fourteen and nothing else. The library's
+# other 59 Java_* exports are platform services (Facebook, IAP, push, crash
+# reporting, background downloads) that are stubbed or answered by the server.
+#
+# Discover this list for another title with:  arc_host <library.so>
+
+Java_com_bight_android_jni_BGCoreJNIBridge_init
+Java_com_bight_android_jni_BGCoreJNIBridge_OGLESInit
+Java_com_bight_android_jni_BGCoreJNIBridge_OGLESResize
+Java_com_bight_android_jni_BGCoreJNIBridge_OGLESRender
+Java_com_bight_android_jni_BGCoreJNIBridge_OGLESRenderGLLoadingScreen
+Java_com_bight_android_jni_BGCoreJNIBridge_OGLESDestroy
+Java_com_bight_android_jni_BGCoreJNIBridge_pointerPressed
+Java_com_bight_android_jni_BGCoreJNIBridge_pointerMoved
+Java_com_bight_android_jni_BGCoreJNIBridge_pointerReleased
+Java_com_bight_android_jni_BGCoreJNIBridge_keyPressed
+Java_com_bight_android_jni_BGCoreJNIBridge_keyReleased
+Java_com_bight_android_jni_BGCoreJNIBridge_pause
+Java_com_bight_android_jni_BGCoreJNIBridge_resume
+Java_com_bight_android_jni_BGCoreJNIBridge_destroy

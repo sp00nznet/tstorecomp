@@ -50,7 +50,7 @@ when a lifted function misbehaves, the ARM64 build is the oracle.
 
 ## The loader (M1, done)
 
-`host/elf_image.cpp`, no dependencies. The image turned out to be about as
+`androidrecomp/runtime/elf_image.cpp`, no dependencies. The image turned out to be about as
 simple as an NDK shared object gets, which is why this is ~350 lines rather
 than a vendored ELF library:
 
@@ -69,7 +69,7 @@ Unresolved imports bind into a `PROT_NONE` guard page, one 8-byte slot each, so
 a call into a shim that does not exist yet faults at an address that identifies
 the missing symbol. A null binding would fault too, and tell you nothing.
 
-`tools/selftest.py` hand-assembles a synthetic aarch64 `.so` exporting the same
+`androidrecomp/tools/selftest.py` hand-assembles a synthetic aarch64 `.so` exporting the same
 fourteen contract symbols and covering all four relocation types, so the loader
 is verifiable on any machine without the game present.
 
@@ -88,7 +88,7 @@ the two findings that shape M2 are absences:
 
 ## The shim (M2, in progress)
 
-`host/shim.cpp` answers an import in three layers, in order: explicit
+`androidrecomp/runtime/shim.cpp` answers an import in three layers, in order: explicit
 implementations, name aliases, then the host C runtime looked up by name at load
 time. The third layer is why 245 libc and 15 libm imports cost almost no code —
 ordinary standard C is already in the host's CRT, so binding it by name is free.

@@ -1,3 +1,6 @@
 [submodule "server"]
 	path = server
 	url = https://github.com/sp00nznet/tsto-springfield.git
+[submodule "androidrecomp"]
+	path = androidrecomp
+	url = https://github.com/sp00nznet/androidrecomp.git

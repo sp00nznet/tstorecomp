@@ -56,3 +56,8 @@ venv/
 *.sln
 *.vcxproj*
 .DS_Store
+
+# tool output
+probe.txt
+run.txt
+triage.md
