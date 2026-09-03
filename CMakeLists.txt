@@ -16,6 +16,8 @@ endif()
 add_executable(tsto_host
   host/elf_image.cpp
   host/shim.cpp
+  host/shim_pthread.cpp
+  host/shim_posix.cpp
   host/main.cpp
 )
 target_include_directories(tsto_host PRIVATE host)

@@ -111,12 +111,30 @@ audio backend is Android's. We only learned that by loading it. Native
 openal-soft has the same API over WASAPI/CoreAudio/ALSA, so it gets linked
 instead.
 
-Current state: **776 imports across four images, 381 resolved, 292 unique
+Two ABI rules do most of the work in this layer.
+
+**Fit inside the guest's storage; do not try to match its layout.** The engine
+allocates `pthread_mutex_t` and friends inline in its own structures, sized by
+Bionic's headers when it was compiled. Guessing those sizes wrong is silent
+corruption, not a crash. We never guess: every pthread call routes through us,
+so the bytes are opaque to the engine, and each object holds nothing but a
+32-bit id naming an entry in a registry. Bionic's smallest such type is
+`pthread_once_t` at four bytes, so a `uint32_t` fits them all — on any host,
+with no NDK headers needed to prove it.
+
+**A smaller host struct written into a larger guest allocation is safe; the
+reverse is not.** Bionic's `struct tm` carries two fields more than the
+Microsoft CRT's, so filling one from the host leaves the leading fields correct
+and the tail untouched. Bionic's `FILE` is where this bites: `__sF` is the array
+behind `stdin`/`stdout`/`stderr`, and indexing it needs Bionic's `sizeof(FILE)`.
+That one symbol is deliberately left unresolved rather than guessed.
+
+Current state: **776 imports across four images, 563 resolved, 180 unique
 outstanding.** The remainder, grouped by what the work actually is:
 
 | Owed by | Left | Desktop replacement |
 |---|---:|---|
-| `libc.so` | 225 | 36 `pthread_*` over Win32/pthreads, POSIX file I/O and `mmap`, `dirent`, time. Bionic-only entry points (the FORTIFY `_chk` family, `__errno`, `__assert2`, `__stack_chk_*`) are already forwarded |
+| `libc.so` | 113 | file I/O, `mmap`, sockets, signals, process. Threads and semaphores run on `std::thread`/`std::recursive_mutex`; locale `*_l` entry points forward to the C locale; time, stdio and the BSD string helpers are written out |
 | `libGLESv2.so`, `libGLESv1_CM.so` | 50 | ANGLE, or desktop GL directly — most ES2 entry points are name-identical. GLESv1_CM means a fixed-function path is still live and needs auditing |
 | `libOpenSLES.so` | 6 | none — dropped along with the shipped `libopenal.so`, replaced by native openal-soft |
 | `libdl.so` | 5 | `dlopen`/`dlsym`/`dlclose`/`dlerror` over the loaded image set. `dl_iterate_phdr` is how the C++ unwinder finds `.eh_frame`, so exceptions need it to report our mapped segments |

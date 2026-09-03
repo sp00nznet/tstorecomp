@@ -4,7 +4,7 @@
 > Android engine into a real cross-platform desktop application — with the
 > server and the town modifiers built into the app, not bolted on beside it.
 
-**Status: M2 in progress.** The loader runs and 381 of 776 imports resolve.
+**Status: M2 in progress.** The loader runs and 563 of 776 imports resolve.
 See [Milestones](#milestones).
 
 ---
@@ -101,11 +101,11 @@ open-ended analysis.
 
 `tsto_host` loads the engine plus every library the APK ships beside it, then
 groups what nothing provides by the library that owes it. Across all four
-images: **776 imports, 381 resolved, 292 unique still outstanding.**
+images: **776 imports, 563 resolved, 180 unique still outstanding.**
 
 | Provider | Left | How the rest got resolved / what remains |
 |---|---:|---|
-| `libc.so` | 225 | 36 `pthread_*`, POSIX file I/O and `mmap`, `dirent`, time. Ordinary standard C binds to the host CRT by name at load time |
+| `libc.so` | 113 | file I/O, `mmap`, sockets, signals, process. Threads, locale, time and BSD string helpers are done; ordinary standard C binds to the host CRT by name |
 | `libGLESv2.so`, `libGLESv1_CM.so` | 50 | needs a GL context first. GLESv1_CM means a fixed-function path is still live |
 | `libOpenSLES.so` | 6 | see below |
 | `libdl.so` | 5 | `dlopen`/`dlsym`/`dlclose`/`dlerror`/`dl_iterate_phdr` — the last is how the C++ unwinder finds `.eh_frame`, so exceptions depend on it |
@@ -138,6 +138,8 @@ tstorecomp/
 ├── host/
 │   ├── elf_image.{h,cpp}   # aarch64 ELF loader: map, relocate, bind, protect
 │   ├── shim.{h,cpp}        # imports: explicit impls, aliases, host CRT by name
+│   ├── shim_pthread.cpp    # threads, semaphores, TLS keys
+│   ├── shim_posix.cpp      # locale, time, stdio, BSD string, wide char
 │   └── main.cpp            # tsto_host: load and report the shim work list
 ├── tools/
 │   ├── apk_probe.py        # feasibility triage: imports, functions, ISA histogram
@@ -158,14 +160,14 @@ tstorecomp/
       page one slot apiece, so calling a missing shim faults at an address that
       names the symbol instead of dereferencing null. Needed by both execution
       paths, so it is built first and runs on any host.
-- [ ] **M2 — Shim + window.** In progress: **381 of 776 imports resolved, 292
-      unique outstanding.** Done so far — APK-shipped dependencies are loaded
-      and used, ordinary standard C binds to the host CRT by name, zlib is
-      linked, and Bionic's FORTIFY and compiler-support entry points are
-      forwarded. Left: 36 `pthread_*`, POSIX file I/O and `mmap`, the 50 GL
-      calls, OpenAL, and a desktop window with a GL context and input driving
-      the fourteen entry points. On an arm64 host that last step is a playable
-      game, with no lifting involved.
+- [ ] **M2 — Shim + window.** In progress: **563 of 776 imports resolved, 180
+      unique outstanding.** Done — APK-shipped dependencies are loaded and used,
+      ordinary standard C binds to the host CRT by name, zlib is linked, and
+      Bionic's FORTIFY, compiler-support, threading, locale, time, stdio and BSD
+      string entry points are implemented. Left: file I/O and `mmap`, sockets,
+      signals, the 50 GL calls, OpenAL, and a desktop window with a GL context
+      and input driving the fourteen entry points. On an arm64 host that last
+      step is a playable game, with no lifting involved.
 - [ ] **M3 — Lifter.** ARM64 → C over the 62,008 recovered functions, with the
       arm64 build as the oracle to diff against.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.

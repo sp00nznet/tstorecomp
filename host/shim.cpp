@@ -168,6 +168,9 @@ void* HostLookup(const char* name) {
 }  // namespace
 
 uint64_t ShimResolve(const char* name) {
+  if (uint64_t a = ShimResolvePthread(name)) return a;
+  if (uint64_t a = ShimResolvePosix(name)) return a;
+
   for (const Entry& e : kExplicit)
     if (strcmp(e.name, name) == 0) return reinterpret_cast<uint64_t>(e.fn);
 

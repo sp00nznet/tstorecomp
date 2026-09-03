@@ -26,4 +26,13 @@ uint64_t ShimResolve(const char* name);
 // How many symbols layer 1 covers, for the coverage report.
 size_t ShimExplicitCount();
 
+// Threads, semaphores and thread-local keys. Kept in its own file because it
+// carries real state rather than forwarding to something the host already has.
+uint64_t ShimResolvePthread(const char* name);
+size_t ShimPthreadCount();
+
+// POSIX, BSD and locale entry points the host CRT does not export by name.
+uint64_t ShimResolvePosix(const char* name);
+size_t ShimPosixCount();
+
 }  // namespace tsto
