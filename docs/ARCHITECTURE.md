@@ -4,7 +4,7 @@
 
 `libscorpio.so` is a stock NDK r23c C++ build: stripped, position-independent,
 ARM64, with complete `.eh_frame` unwind tables. It exports 12,653 symbols and
-imports 481. Of the 73 `Java_*` JNI exports, exactly one cluster matters:
+imports 481 (776 once the libraries the APK ships beside it are counted too). Of the 73 `Java_*` JNI exports, exactly one cluster matters:
 
 ```
 Java_com_bight_android_jni_BGCoreJNIBridge_init
@@ -39,7 +39,7 @@ The host program is required either way, so it is built first.
 
 **Path A — native ARM64 host.** On Apple Silicon, Windows-on-ARM and ARM64
 Linux the instructions in `libscorpio.so` already run. What it lacks is Bionic
-and Android: a loader that maps the ELF and resolves its 481 imports against the
+and Android: a loader that maps the ELF and resolves its imports against the
 shim is enough to call `init` / `OGLESRender` directly. This gets a real,
 playable window early and validates the shim, the asset paths, the GL usage and
 the server wiring before any lifting exists to be blamed for a bug.
@@ -86,21 +86,46 @@ the two findings that shape M2 are absences:
   Java. The engine never calls out to it, so it needs no shim either — only a
   decision never to make those calls.
 
-## The shim (M2)
+## The shim (M2, in progress)
 
-481 undefined symbols across 13 libraries. Grouped by what the work actually is:
+`host/shim.cpp` answers an import in three layers, in order: explicit
+implementations, name aliases, then the host C runtime looked up by name at load
+time. The third layer is why 245 libc and 15 libm imports cost almost no code —
+ordinary standard C is already in the host's CRT, so binding it by name is free.
 
-| Android library | Desktop replacement | Notes |
-|---|---|---|
-| `libc.so`, `libm.so`, `libdl.so` | host libc | Bionic-specific entry points (`__system_property_get`, `__cxa_atexit` variants) need thin wrappers |
-| `libc++_shared.so` | libc++ / system STL | ABI-compatible enough on the lifted path; Path A maps the shipped copy |
-| `libz.so` | zlib | direct |
-| `libGLESv2.so`, `libGLESv1_CM.so` | ANGLE | 50 symbols. GLESv1_CM means a fixed-function path is still in use; ANGLE covers ES2, the ES1 calls need auditing |
-| `libEGL.so` | — | nothing imported; the host's windowing library creates the context |
-| `libopenal.so` | openal-soft | 32 symbols; the game already ships openal-soft, same API |
-| `liblog.so` | printf | trivial |
-| `libjnigraphics.so` | stb_image | bitmap lock/unlock around a raw pixel buffer |
-| `libNimble.so` | — | nothing imported; EA's service SDK is called from Java, never from the engine |
+The alias layer has one rule worth stating: **an alias must be ABI-identical,
+not merely similar.** Bionic's `mkdir(path, mode)` and the Microsoft CRT's
+`_mkdir(path)` take different arguments. Aliasing them would compile, link, run,
+and corrupt the stack. Anything whose signature differs is deliberately left
+unresolved so it appears in the work list and gets a real wrapper.
+
+Above the shim sits a simpler rule: **if the APK ships it, load it.** Every
+`DT_NEEDED` entry present next to the engine is loaded as its own image and used
+to satisfy the engine's imports; everything else is an Android system library
+and falls through to the shim. That is what answers libc++_shared's 114
+NDK-mangled (`_ZNSt6__ndk1...`) symbols, which no host STL can provide.
+
+The exception proves the rule's worth. Loading the shipped `libopenal.so`
+resolves 32 symbols but introduces six `libOpenSLES.so` imports, because its
+audio backend is Android's. We only learned that by loading it. Native
+openal-soft has the same API over WASAPI/CoreAudio/ALSA, so it gets linked
+instead.
+
+Current state: **776 imports across four images, 381 resolved, 292 unique
+outstanding.** The remainder, grouped by what the work actually is:
+
+| Owed by | Left | Desktop replacement |
+|---|---:|---|
+| `libc.so` | 225 | 36 `pthread_*` over Win32/pthreads, POSIX file I/O and `mmap`, `dirent`, time. Bionic-only entry points (the FORTIFY `_chk` family, `__errno`, `__assert2`, `__stack_chk_*`) are already forwarded |
+| `libGLESv2.so`, `libGLESv1_CM.so` | 50 | ANGLE, or desktop GL directly — most ES2 entry points are name-identical. GLESv1_CM means a fixed-function path is still live and needs auditing |
+| `libOpenSLES.so` | 6 | none — dropped along with the shipped `libopenal.so`, replaced by native openal-soft |
+| `libdl.so` | 5 | `dlopen`/`dlsym`/`dlclose`/`dlerror` over the loaded image set. `dl_iterate_phdr` is how the C++ unwinder finds `.eh_frame`, so exceptions need it to report our mapped segments |
+| `libjnigraphics.so` | 3 | bitmap lock/unlock around a raw pixel buffer |
+| `libc++_shared.so` | 1 | the APK's own copy, loaded as an image (2,437 symbols) |
+| `libm.so` | 1 | host libm |
+| `libz.so` | 0 | linked zlib |
+| `liblog.so` | 0 | forwarded to `stderr` |
+| `libEGL.so`, `libNimble.so` | 0 | nothing imported; neither needs a shim |
 
 ## The lifter (M3)
 

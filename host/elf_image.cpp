@@ -158,6 +158,49 @@ uint64_t ElfImage::SymbolValue(uint32_t index, const Resolver& resolve) {
   return imp.bound_to;
 }
 
+std::vector<std::string> ElfImage::ReadNeeded(const std::string& path) {
+  std::vector<std::string> out;
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return out;
+  std::vector<uint8_t> file((std::istreambuf_iterator<char>(f)),
+                            std::istreambuf_iterator<char>());
+  if (file.size() < sizeof(Ehdr)) return out;
+
+  const Ehdr* eh = reinterpret_cast<const Ehdr*>(file.data());
+  static const uint8_t kMagic[4] = {0x7f, 'E', 'L', 'F'};
+  if (memcmp(eh->ident, kMagic, 4) != 0 || eh->machine != 183) return out;
+
+  const Phdr* ph = reinterpret_cast<const Phdr*>(file.data() + eh->phoff);
+  // Nothing is mapped here, so dynamic-section addresses have to be walked
+  // back to file offsets through the PT_LOAD entries that contain them.
+  auto to_offset = [&](uint64_t vaddr) -> const uint8_t* {
+    for (uint16_t i = 0; i < eh->phnum; ++i) {
+      if (ph[i].type != PT_LOAD) continue;
+      if (vaddr >= ph[i].vaddr && vaddr < ph[i].vaddr + ph[i].filesz)
+        return file.data() + ph[i].offset + (vaddr - ph[i].vaddr);
+    }
+    return nullptr;
+  };
+
+  for (uint16_t i = 0; i < eh->phnum; ++i) {
+    if (ph[i].type != PT_DYNAMIC) continue;
+    const Dyn* dyn = reinterpret_cast<const Dyn*>(to_offset(ph[i].vaddr));
+    if (!dyn) return out;
+    const char* strtab = nullptr;
+    std::vector<uint32_t> offsets;
+    for (const Dyn* d = dyn; d->tag != 0; ++d) {
+      if (d->tag == DT_STRTAB)
+        strtab = reinterpret_cast<const char*>(to_offset(d->val));
+      else if (d->tag == DT_NEEDED)
+        offsets.push_back(static_cast<uint32_t>(d->val));
+    }
+    if (strtab)
+      for (uint32_t off : offsets) out.push_back(strtab + off);
+    break;
+  }
+  return out;
+}
+
 bool ElfImage::Load(const std::string& path, const Resolver& resolve,
                     std::string* err) {
   auto fail = [&](const char* m) {

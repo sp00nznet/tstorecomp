@@ -4,8 +4,8 @@
 > Android engine into a real cross-platform desktop application — with the
 > server and the town modifiers built into the app, not bolted on beside it.
 
-**Status: M1 complete.** The loader maps and relocates the engine and verifies
-the host contract. See [Milestones](#milestones).
+**Status: M2 in progress.** The loader runs and 381 of 776 imports resolve.
+See [Milestones](#milestones).
 
 ---
 
@@ -44,8 +44,8 @@ projects whose licensing is unclear.
 
 ## Building
 
-Needs CMake 3.20+ and any C++17 compiler. Nothing else — the loader has no
-dependencies.
+Needs CMake 3.20+ and any C++17 compiler. zlib is optional; without it those
+12 imports stay on the work list.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -54,6 +54,10 @@ cmake --build build
 python tools/selftest.py          # loader self-check, no APK required
 ./build/tsto_host path/to/libscorpio.so
 ```
+
+On Windows, add `-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake`
+so CMake finds zlib. A toolchain file only takes effect on a fresh cache, so
+delete `build/` if you add it later.
 
 `tsto_host` maps the engine, applies its relocations, binds its imports, and
 prints what the shim still owes it. `selftest.py` builds a synthetic aarch64
@@ -95,28 +99,37 @@ open-ended analysis.
 
 ### The shim surface
 
-`tsto_host` groups every unresolved import by the library that owes it. This is
-the M2 work list:
+`tsto_host` loads the engine plus every library the APK ships beside it, then
+groups what nothing provides by the library that owes it. Across all four
+images: **776 imports, 381 resolved, 292 unique still outstanding.**
 
-| Provider | Symbols | Notes |
+| Provider | Left | How the rest got resolved / what remains |
 |---|---:|---|
-| `libc.so` | 245 | host libc; a handful of Bionic-only entry points need wrappers |
-| `libc++_shared.so` | 114 | libc++ / system STL |
-| `libGLESv2.so`, `libGLESv1_CM.so` | 50 | ANGLE. GLESv1_CM means a fixed-function path is still live |
-| `libopenal.so` | 32 | openal-soft — the game already ships it, same API |
-| `libm.so` | 15 | direct |
-| `libz.so` | 12 | zlib, direct |
-| `libdl.so` | 5 | `dlopen`/`dlsym`/`dlclose`/`dlerror`/`dl_iterate_phdr` |
+| `libc.so` | 225 | 36 `pthread_*`, POSIX file I/O and `mmap`, `dirent`, time. Ordinary standard C binds to the host CRT by name at load time |
+| `libGLESv2.so`, `libGLESv1_CM.so` | 50 | needs a GL context first. GLESv1_CM means a fixed-function path is still live |
+| `libOpenSLES.so` | 6 | see below |
+| `libdl.so` | 5 | `dlopen`/`dlsym`/`dlclose`/`dlerror`/`dl_iterate_phdr` — the last is how the C++ unwinder finds `.eh_frame`, so exceptions depend on it |
 | `libjnigraphics.so` | 3 | bitmap lock/unlock around a raw pixel buffer |
-| `liblog.so` | 3 | printf |
-| unclassified | 2 | `getentropy`, `__dynamic_cast` |
+| `libc++_shared.so` | 1 | **satisfied by loading the APK's own copy** — 2,437 symbols |
+| `libm.so` | 1 | host libm |
+| `libz.so` | 0 | **linked zlib** — Bionic ships stock zlib, every signature matches |
+| `liblog.so` | 0 | forwarded to `stderr` |
 
-Two absences matter as much as the entries. `libEGL.so` and `libNimble.so` are
-both in `DT_NEEDED` yet import **zero** symbols: EGL context creation happens on
-the Java side, and Nimble (EA's identity/telemetry/IAP SDK) is reached only
-through `Java_com_ea_nimble_bridge_*` exports the engine never calls itself. So
-the desktop host creates the GL context — which GLFW or SDL does anyway — and
-neither library needs a shim at all.
+Three findings shaped this. `libEGL.so` and `libNimble.so` are in `DT_NEEDED`
+yet import **zero** symbols — EGL context creation happens on the Java side, and
+Nimble (EA's identity/telemetry/IAP SDK) is only ever called *into* from Java.
+Neither needs a shim; the host's windowing library makes the GL context anyway.
+
+And the libc++ problem solved itself. Its 114 imports are NDK-mangled
+(`_ZNSt6__ndk1...`) libc++ internals that no host STL can provide — but the APK
+ships `libc++_shared.so`, so the loader just loads it. Anything in `DT_NEEDED`
+that the APK ships is loaded and used; everything else is an Android system
+library and falls to the shim.
+
+That rule has one exception, and loading it is how we found out: the shipped
+`libopenal.so` resolves 32 symbols but drags in six `libOpenSLES.so` imports,
+because its audio backend is Android's. Native openal-soft has WASAPI,
+CoreAudio and ALSA backends and the same API, so it gets linked instead.
 
 ## Architecture
 
@@ -124,6 +137,7 @@ neither library needs a shim at all.
 tstorecomp/
 ├── host/
 │   ├── elf_image.{h,cpp}   # aarch64 ELF loader: map, relocate, bind, protect
+│   ├── shim.{h,cpp}        # imports: explicit impls, aliases, host CRT by name
 │   └── main.cpp            # tsto_host: load and report the shim work list
 ├── tools/
 │   ├── apk_probe.py        # feasibility triage: imports, functions, ISA histogram
@@ -132,7 +146,6 @@ tstorecomp/
 ├── docs/
 │   ├── ARCHITECTURE.md     # the plan, in detail
 │   └── triage-*.md         # generated reports
-├── shim/                   # (M2) the 481 imports
 └── lifter/                 # (M3) aarch64 -> C
 ```
 
@@ -145,10 +158,14 @@ tstorecomp/
       page one slot apiece, so calling a missing shim faults at an address that
       names the symbol instead of dereferencing null. Needed by both execution
       paths, so it is built first and runs on any host.
-- [ ] **M2 — Shim + window.** The 481 imports, plus a desktop window, GL context
-      and mouse/keyboard input driving the fourteen entry points. On an arm64
-      host this is a playable game: the stock `.so` executes as-is once its
-      imports resolve, with no lifting involved.
+- [ ] **M2 — Shim + window.** In progress: **381 of 776 imports resolved, 292
+      unique outstanding.** Done so far — APK-shipped dependencies are loaded
+      and used, ordinary standard C binds to the host CRT by name, zlib is
+      linked, and Bionic's FORTIFY and compiler-support entry points are
+      forwarded. Left: 36 `pthread_*`, POSIX file I/O and `mmap`, the 50 GL
+      calls, OpenAL, and a desktop window with a GL context and input driving
+      the fourteen entry points. On an arm64 host that last step is a playable
+      game, with no lifting involved.
 - [ ] **M3 — Lifter.** ARM64 → C over the 62,008 recovered functions, with the
       arm64 build as the oracle to diff against.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.

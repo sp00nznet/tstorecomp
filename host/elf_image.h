@@ -38,6 +38,11 @@ class ElfImage {
 
   bool Load(const std::string& path, const Resolver& resolve, std::string* err);
 
+  // The DT_NEEDED list, read from a file without mapping it. Lets a caller
+  // load an image's APK-shipped dependencies before the image itself, so they
+  // can satisfy its imports.
+  static std::vector<std::string> ReadNeeded(const std::string& path);
+
   // Host address of an exported symbol, or 0.
   uint64_t Lookup(const char* name) const;
 
