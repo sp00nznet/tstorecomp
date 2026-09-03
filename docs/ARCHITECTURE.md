@@ -48,6 +48,44 @@ the server wiring before any lifting exists to be blamed for a bug.
 a mapped ELF. Path A is the reference implementation Path B is diffed against;
 when a lifted function misbehaves, the ARM64 build is the oracle.
 
+## The loader (M1, done)
+
+`host/elf_image.cpp`, no dependencies. The image turned out to be about as
+simple as an NDK shared object gets, which is why this is ~350 lines rather
+than a vendored ELF library:
+
+- **Three `PT_LOAD` segments** — one r-x of 26.8 MB, two rw- totalling 810 KB.
+- **98,172 relocations in four types**: 80,248 `R_AARCH64_RELATIVE`, 11,122
+  `ABS64`, 6,068 `JUMP_SLOT`, 734 `GLOB_DAT`. Nothing else appears, and an
+  unrecognised type is a hard error rather than a skipped entry.
+- **No `PT_TLS`**, no TLSDESC. Thread-local storage would have meant modelling
+  a TLS block per guest thread; the engine reaches `TPIDR_EL0` directly instead,
+  which is one of the things the lifter's 1,571 `mrs` sites cover.
+- **1,527 static constructors** in `DT_INIT_ARRAY`, which run before `init`.
+- `DT_SYMTAB` carries no length, so the symbol count (13,135) comes from the
+  SysV hash table's `nchain` field.
+
+Unresolved imports bind into a `PROT_NONE` guard page, one 8-byte slot each, so
+a call into a shim that does not exist yet faults at an address that identifies
+the missing symbol. A null binding would fault too, and tell you nothing.
+
+`tools/selftest.py` hand-assembles a synthetic aarch64 `.so` exporting the same
+fourteen contract symbols and covering all four relocation types, so the loader
+is verifiable on any machine without the game present.
+
+## Import surface, measured
+
+`tsto_host` groups unresolved imports by provider. The counts are in the README;
+the two findings that shape M2 are absences:
+
+- **No `egl*` imports.** `libEGL.so` is in `DT_NEEDED` but contributes nothing.
+  Context and surface creation live on the Java side, so on desktop the host's
+  windowing library does it and there is no EGL shim.
+- **No `libNimble.so` imports.** Nimble is reached only through the
+  `Java_com_ea_nimble_bridge_*` exports, which are called *into* the engine from
+  Java. The engine never calls out to it, so it needs no shim either — only a
+  decision never to make those calls.
+
 ## The shim (M2)
 
 481 undefined symbols across 13 libraries. Grouped by what the work actually is:
@@ -57,12 +95,12 @@ when a lifted function misbehaves, the ARM64 build is the oracle.
 | `libc.so`, `libm.so`, `libdl.so` | host libc | Bionic-specific entry points (`__system_property_get`, `__cxa_atexit` variants) need thin wrappers |
 | `libc++_shared.so` | libc++ / system STL | ABI-compatible enough on the lifted path; Path A maps the shipped copy |
 | `libz.so` | zlib | direct |
-| `libEGL.so`, `libGLESv2.so`, `libGLESv1_CM.so` | ANGLE | GLESv1_CM means a fixed-function path is still in use; ANGLE covers ES2, the ES1 calls need auditing |
-| `libopenal.so` | openal-soft | the game already ships openal-soft; same API |
+| `libGLESv2.so`, `libGLESv1_CM.so` | ANGLE | 50 symbols. GLESv1_CM means a fixed-function path is still in use; ANGLE covers ES2, the ES1 calls need auditing |
+| `libEGL.so` | — | nothing imported; the host's windowing library creates the context |
+| `libopenal.so` | openal-soft | 32 symbols; the game already ships openal-soft, same API |
 | `liblog.so` | printf | trivial |
-| `libandroid.so` | file I/O | `AAssetManager` over the extracted `assets/` tree |
 | `libjnigraphics.so` | stb_image | bitmap lock/unlock around a raw pixel buffer |
-| `libNimble.so` | stub | EA's service SDK (identity, telemetry, IAP). Its transport is the same HTTP the self-hosted server answers; the SDK itself is stubbed to success |
+| `libNimble.so` | — | nothing imported; EA's service SDK is called from Java, never from the engine |
 
 ## The lifter (M3)
 
@@ -93,9 +131,19 @@ capstone could not decode. Small enough to review individually.
 ## Server and content
 
 The client fetches DLC and talks gameplay protocol over plain HTTP to a base
-URL. A self-hosted server answers it. In a native build the URL is a
-configuration value rather than a byte patch, which also removes the
-"clean APK only" constraint the Android patcher has.
+URL. In a native build that URL is a configuration value rather than a byte
+patch, which also removes the "clean APK only" constraint the Android patcher
+has.
 
-Town-modifier tooling attaches to that server, not to this repository — see the
-README's policy section.
+The server runs **inside the app as a loopback sidecar** — started on
+`127.0.0.1` at launch, shut down on exit. No container, no LAN, nothing leaving
+the machine. A sidecar process rather than a linked-in library because it reuses
+the existing protocol implementation unchanged, and because upstream
+`d-fens/tsto_server` states no licence, so its code can be referenced as a
+submodule but never vendored into an MIT repository or linked into an MIT
+binary. A separate process is not a derivative work.
+
+`server/` is that submodule, pointing at our fork. The town modifiers live
+there and attach over the same loopback. After M3 the netcode is ours, so the
+HTTP hop could collapse into direct in-process calls — worth doing only if it
+ever measurably matters.
