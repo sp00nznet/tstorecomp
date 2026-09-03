@@ -4,8 +4,10 @@
 > with the server and the town modifiers built into the app, not bolted on
 > beside it.
 
-**Status: M2 in progress.** The window opens, the engine loads, and 613 of 776
-imports resolve. See [Milestones](#milestones).
+**Status: M2 all but done.** The window opens, the engine loads, and **770 of
+776 imports resolve** — the last six are the audio backend. What remains is the
+JNI bridge that lets the host actually call the engine. See
+[Milestones](#milestones).
 
 ---
 
@@ -100,40 +102,37 @@ function starts they reduce to an address → function-pointer table.
 ## Import surface
 
 Across the engine and the three libraries the APK ships beside it: **776
-imports, 613 resolved, 130 unique outstanding.**
+imports, 770 resolved, 6 outstanding.**
 
-| Provider | Left | Notes |
-|---|---:|---|
-| `libc.so` | 113 | file I/O, `mmap`, sockets, signals, process |
-| `libOpenSLES.so` | 6 | goes away with the shipped `libopenal.so`, replaced by native openal-soft |
-| `libdl.so` | 5 | `dl_iterate_phdr` is how the C++ unwinder finds `.eh_frame`, so exceptions depend on it |
-| `libjnigraphics.so` | 3 | bitmap lock/unlock around a raw pixel buffer |
-| `libc++_shared.so` | 1 | `__sF` — needs Bionic's `sizeof(FILE)`, deliberately not guessed |
-| `libm.so`, misc | 2 | |
-| `libGLESv2/v1_CM` | **0** | desktop GL exports all 50 under identical names — zero wrappers |
-| `libz.so`, `liblog.so` | **0** | linked zlib; log forwarded to stderr |
+The six are `libOpenSLES` interface IDs, reached only through the shipped
+`libopenal.so` — its audio backend is Android's. They go when native openal-soft
+replaces it, which is the one library worth replacing rather than loading.
 
-Three findings shaped this. `libEGL.so` and `libNimble.so` sit in `DT_NEEDED`
-yet import **zero** symbols — EGL context creation happened on the Java side, and
-Nimble (EA's identity/telemetry/IAP SDK) is only ever called *into* from Java.
-Neither needs a shim, and the host's windowing library makes the GL context
-anyway.
+Getting there turned on a few findings worth keeping:
 
-libc++ solved itself: its 114 NDK-mangled (`_ZNSt6__ndk1...`) symbols cannot come
-from any host STL, but the APK ships `libc++_shared.so`, so the loader loads it.
-
-And GL cost nothing. A desktop GL 2.1 compatibility context exports every GLES2
-and GLESv1_CM entry point the engine imports, under identical names, so all 50
-bind straight through the driver.
+- **`libEGL.so` and `libNimble.so` import nothing at all.** Both sit in
+  `DT_NEEDED`, but EGL context creation happened on the Java side and Nimble
+  (EA's identity/telemetry/IAP SDK) is only ever called *into* from Java. Neither
+  needs a shim; the host's windowing library makes the GL context anyway.
+- **libc++ solved itself.** Its 114 NDK-mangled (`_ZNSt6__ndk1...`) symbols
+  cannot come from any host STL — but the APK ships `libc++_shared.so`, so the
+  loader loads it and uses it.
+- **GL cost nothing.** A desktop GL 2.1 compatibility context exports every
+  GLES2 and GLESv1_CM entry point the engine imports, under identical names, so
+  all 50 bind straight through the driver with no wrappers.
+- **File I/O could not be forwarded.** Bionic's `O_CREAT` is 0100 where the
+  Microsoft CRT's is 0x100, and `struct stat` and `struct dirent` have layouts of
+  their own — so those are written field by field at Bionic's offsets.
+- **`dl_iterate_phdr` matters more than it looks.** It is how the C++ unwinder
+  finds each image's `.eh_frame`, so guest exceptions do not unwind without it.
 
 ## Milestones
 
 - [x] **M0 — Triage.** Measure the target.
 - [x] **M1 — Loader.** Map, relocate, bind, protect; verify the host contract.
-- [ ] **M2 — Shim + window.** In progress: **613 of 776 resolved, 130 unique
-      outstanding**, and an SDL2 window with a live GL context. Left: file I/O
-      and `mmap`, sockets, audio, and the JNI bridge that lets the host actually
-      call the fourteen entry points.
+- [ ] **M2 — Shim + window.** **770 of 776 imports resolved**, and an SDL2 window
+      with a live GL context. Left: the JNI bridge — a `JNIEnv` the engine can
+      call back through, plus input translation — and audio.
 - [ ] **M3 — Lifter.** ARM64 → C over the 62,008 recovered functions, with an
       arm64 build as the oracle to diff against.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.
