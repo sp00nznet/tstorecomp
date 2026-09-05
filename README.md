@@ -7,12 +7,12 @@
 **Status: the engine is lifted and running its static initialisation.** The
 window opens, the engine loads, and **770 of 776 imports resolve** — the last
 six are the audio backend. The lifter covers **99.93% of instructions**, and
-`arc_boot` runs **1,508 of the engine's 1,527 static constructors**; `init`
+`arc_boot` runs **1,521 of the engine's 1,527 static constructors**; `init`
 then prints the engine's own startup banner and makes 96 JNI calls. What
 remains is the JNI bridge that lets the host drive the engine for real. See
 [Milestones](#milestones).
 
-Fourteen of those constructors were won without touching this port at all.
+Twenty-seven of those constructors were won without touching this port at all.
 They came from [fgrecomp](https://github.com/sp00nznet/fgrecomp), the sibling
 port on the same kit: a second, unrelated engine surfaced a shim bug and a
 whole class of missing function boundaries that this engine had been quietly
@@ -122,9 +122,12 @@ replaces it, which is the one library worth replacing rather than loading.
 Getting there turned on a few findings worth keeping:
 
 - **`libEGL.so` and `libNimble.so` import nothing at all.** Both sit in
-  `DT_NEEDED`, but EGL context creation happened on the Java side and Nimble
-  (EA's identity/telemetry/IAP SDK) is only ever called *into* from Java. Neither
-  needs a shim; the host's windowing library makes the GL context anyway.
+  `DT_NEEDED`, but EGL context creation happened on the Java side, and the
+  host's windowing library makes the GL context anyway. Neither needs a *shim* —
+  which is not the same as neither mattering. Nimble (EA's identity/telemetry/IAP
+  SDK) turned out to be called into by the engine's own static constructors, not
+  only from Java, and since it is ARM code like any other it has to be lifted
+  rather than merely mapped. Three constructors trapped on that until it was.
 - **libc++ solved itself.** Its 114 NDK-mangled (`_ZNSt6__ndk1...`) symbols
   cannot come from any host STL — but the APK ships `libc++_shared.so`, so the
   loader loads it and uses it.
@@ -144,13 +147,15 @@ Getting there turned on a few findings worth keeping:
 - [ ] **M2 — Shim + window.** **770 of 776 imports resolved**, and an SDL2 window
       with a live GL context. Left: the JNI bridge — a `JNIEnv` the engine can
       call back through, plus input translation — and audio.
-- [x] **M3 — Lifter.** ARM64 → C. **99.93% of instructions**, across 70,675
-      functions in two images — the engine and the C++ runtime the APK ships
+- [x] **M3 — Lifter.** ARM64 → C. **99.94% of instructions**, across 70,688
+      functions in three images — the engine and the C++ runtime the APK ships
       beside it, because a call into that runtime lands in ARM code like any
       other. Boundaries come from `.eh_frame`, the PLT, call sites and the gaps
       between them, which between them leave *no* undescribed call target
       standing in as a stub. Verified against Unicorn rather than arm64
-      hardware. `arc_boot` runs 1,508 of 1,527 static constructors.
+      hardware. `arc_boot` runs 1,521 of 1,527 static constructors with no
+      traps left; what remains is six null dereferences, which are missing
+      initialisation rather than missing code.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.
 
 On an arm64 host — Apple Silicon, Windows-on-ARM, arm64 Linux — M2 is the last
