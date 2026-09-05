@@ -6,7 +6,16 @@
 # other 59 Java_* exports are platform services (Facebook, IAP, push, crash
 # reporting, background downloads) that are stubbed or answered by the server.
 #
+# The dex declares sixteen natives on this class, not fourteen: doOnPause and
+# getInfo are also marked native in the Java shell. Neither is exported by any
+# library in the package -- not the engine, not libNimble, not libopenal -- so
+# there is no symbol for a host to call and they are deliberately absent here.
+# Either they are bound through RegisterNatives, which needs no export, or they
+# are unused in this build. Checked, not assumed.
+#
 # Discover this list for another title with:  arc_host <library.so>
+# Cross-check it against the Java side with:
+#   dex_contract.py game.apk --contract --grep BGCore --library lib/arm64-v8a/*.so
 
 Java_com_bight_android_jni_BGCoreJNIBridge_init
 Java_com_bight_android_jni_BGCoreJNIBridge_OGLESInit
