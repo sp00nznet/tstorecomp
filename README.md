@@ -4,10 +4,21 @@
 > with the server and the town modifiers built into the app, not bolted on
 > beside it.
 
-**Status: M2 all but done.** The window opens, the engine loads, and **770 of
-776 imports resolve** — the last six are the audio backend. What remains is the
-JNI bridge that lets the host actually call the engine. See
+**Status: the engine is lifted and running its static initialisation.** The
+window opens, the engine loads, and **770 of 776 imports resolve** — the last
+six are the audio backend. The lifter covers **99.93% of instructions**, and
+`arc_boot` runs **1,508 of the engine's 1,527 static constructors**; `init`
+then prints the engine's own startup banner and makes 96 JNI calls. What
+remains is the JNI bridge that lets the host drive the engine for real. See
 [Milestones](#milestones).
+
+Fourteen of those constructors were won without touching this port at all.
+They came from [fgrecomp](https://github.com/sp00nznet/fgrecomp), the sibling
+port on the same kit: a second, unrelated engine surfaced a shim bug and a
+whole class of missing function boundaries that this engine had been quietly
+suffering from too. That is the argument for
+[androidrecomp](https://github.com/sp00nznet/androidrecomp) being a separate
+repository, made concrete.
 
 ---
 
@@ -133,8 +144,13 @@ Getting there turned on a few findings worth keeping:
 - [ ] **M2 — Shim + window.** **770 of 776 imports resolved**, and an SDL2 window
       with a live GL context. Left: the JNI bridge — a `JNIEnv` the engine can
       call back through, plus input translation — and audio.
-- [ ] **M3 — Lifter.** ARM64 → C over the 62,008 recovered functions, with an
-      arm64 build as the oracle to diff against.
+- [x] **M3 — Lifter.** ARM64 → C. **99.93% of instructions**, across 70,675
+      functions in two images — the engine and the C++ runtime the APK ships
+      beside it, because a call into that runtime lands in ARM code like any
+      other. Boundaries come from `.eh_frame`, the PLT, call sites and the gaps
+      between them, which between them leave *no* undescribed call target
+      standing in as a stub. Verified against Unicorn rather than arm64
+      hardware. `arc_boot` runs 1,508 of 1,527 static constructors.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.
 
 On an arm64 host — Apple Silicon, Windows-on-ARM, arm64 Linux — M2 is the last
