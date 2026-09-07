@@ -2,22 +2,39 @@
 #
 # Every JNI entry point the Android Java shell called to drive the engine:
 # lifecycle, a GL surface, a resize hook, a render tick, and pointer/key input.
-# A desktop host implements these fourteen and one more, and that one is the
-# correction this file exists to record: `Java_com_ea_simpsons_ScorpioJNI_init`
+# A desktop host implements these fourteen and four more, and the first of the
+# four is the correction this file exists to record: `ScorpioJNI_init`
 # is not a platform service. It is the game's boot -- it builds the application
 # and installs its first state -- and without it OGLESRender returns after six
 # guest calls, having found no state to update. It reads a String and takes it
 # from Java's onCreate, which is why it looked like glue.
 #
-# The other 58 Java_* exports really are platform services (Facebook, IAP,
+# The other 55 Java_* exports really are platform services (Facebook, IAP,
 # push, crash reporting, background downloads) that are stubbed or answered by
 # the server. "Platform service" was a guess about all 59, and it was wrong
-# about one of them; the cost of that guess was a black window.
+# about four of them; the cost of that guess was a black window, and then a
+# crash with nothing anywhere naming the cause.
+#
+# Three more came from the same lesson, and they are the Android activity
+# lifecycle: LifecycleOnCreate, LifecycleStart and LifecycleResume. A desktop
+# host has no activity, so they looked like nothing to call. LifecycleStart is
+# the one that matters, and its boolean argument must be TRUE -- false means
+# "the language did not change and this is not a fresh start", and the engine
+# then never initialises its font system. Every font-cache lookup afterwards
+# answers null, and the first caller that does not check its result crashes.
 #
 # Order matters as much as membership. The GL surface exists before the game
-# boots, because the game's boot allocates out of the renderer's heap:
+# boots, because the game's boot allocates out of the renderer's heap, and the
+# lifecycle follows the boot:
 #
-#     init -> OGLESInit -> OGLESResize -> ScorpioJNI_init -> resume -> render...
+#     init -> OGLESInit -> OGLESResize -> ScorpioJNI_init
+#          -> LifecycleOnCreate -> LifecycleStart(true) -> LifecycleResume
+#          -> resume -> render...
+#
+# With that sequence the engine loads LoadingState, RebuildTextureTask and
+# ReachabilityTask, finds no server, and draws its own "Cannot Connect to the
+# Internet" screen -- the correct behaviour, and the first frame of the game's
+# real UI.
 #
 # The dex declares sixteen natives on this class, not fourteen: doOnPause and
 # getInfo are also marked native in the Java shell. Neither is exported by any
@@ -45,3 +62,6 @@ Java_com_bight_android_jni_BGCoreJNIBridge_pause
 Java_com_bight_android_jni_BGCoreJNIBridge_resume
 Java_com_bight_android_jni_BGCoreJNIBridge_destroy
 Java_com_ea_simpsons_ScorpioJNI_init
+Java_com_ea_simpsons_ScorpioJNI_LifecycleOnCreate
+Java_com_ea_simpsons_ScorpioJNI_LifecycleStart
+Java_com_ea_simpsons_ScorpioJNI_LifecycleResume

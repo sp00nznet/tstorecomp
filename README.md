@@ -6,16 +6,19 @@
 
 ![The Simpsons: Tapped Out, lifted to C and rendering on Windows](docs/images/tsto-splash.png)
 
-**Status: it renders.** The engine's own splash screen, drawn by lifted ARM64
-code through the desktop GL driver — no emulator, no Android runtime, no APK
-at runtime. The donut in the corner spins.
+**Status: it boots.** The engine's own splash, then its real UI. The state
+machine runs `LoadingState`, `RebuildTextureTask` and `ReachabilityTask`, finds
+no server, and draws its own "Cannot Connect to the Internet" screen with a
+reconnect countdown — the correct behaviour for a game whose servers are gone,
+rendered entirely by recompiled ARM64 code with no emulator and no Android
+runtime.
 
-**770 of 776 imports resolve** — the last six are the audio backend. The
-lifter covers **99.93% of instructions**, `arc_boot` runs **all 1,527 static
-constructors with no faults**, and the engine boots its game state machine,
-reads its own asset packs, and renders and presents frames while mouse input is
-forwarded as touch. What remains is getting past the splash, which needs the
-server. See [Milestones](#milestones).
+![Tapped Out's own error screen, rendered by lifted ARM64 code](docs/images/tsto-error-screen.png)
+
+**770 of 776 imports resolve** — the last six are the audio backend. The lifter
+covers **99.93% of instructions**, `arc_boot` runs **all 1,527 static
+constructors with no faults**, and mouse input is forwarded as touch. What
+remains is the server. See [Milestones](#milestones).
 
 Twenty-seven of those constructors were won without touching this port at all.
 They came from [fgrecomp](https://github.com/sp00nznet/fgrecomp), the sibling
