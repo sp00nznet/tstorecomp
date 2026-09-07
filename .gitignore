@@ -61,3 +61,11 @@ venv/
 probe.txt
 run.txt
 triage.md
+*.log
+*.out
+*.err
+*.ppm
+
+# Local launchers: one machine's paths, not part of the port.
+build.bat
+run-*.bat

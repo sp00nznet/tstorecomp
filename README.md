@@ -4,13 +4,18 @@
 > with the server and the town modifiers built into the app, not bolted on
 > beside it.
 
-**Status: the engine is lifted and running its static initialisation.** The
-window opens, the engine loads, and **770 of 776 imports resolve** — the last
-six are the audio backend. The lifter covers **99.93% of instructions**, and
-`arc_boot` runs **1,521 of the engine's 1,527 static constructors**; `init`
-then prints the engine's own startup banner and makes 96 JNI calls. What
-remains is the JNI bridge that lets the host drive the engine for real. See
-[Milestones](#milestones).
+![The Simpsons: Tapped Out, lifted to C and rendering on Windows](docs/images/tsto-splash.png)
+
+**Status: it renders.** The engine's own splash screen, drawn by lifted ARM64
+code through the desktop GL driver — no emulator, no Android runtime, no APK
+at runtime. The donut in the corner spins.
+
+**770 of 776 imports resolve** — the last six are the audio backend. The
+lifter covers **99.93% of instructions**, `arc_boot` runs **all 1,527 static
+constructors with no faults**, and the engine boots its game state machine,
+reads its own asset packs, and renders and presents frames while mouse input is
+forwarded as touch. What remains is getting past the splash, which needs the
+server. See [Milestones](#milestones).
 
 Twenty-seven of those constructors were won without touching this port at all.
 They came from [fgrecomp](https://github.com/sp00nznet/fgrecomp), the sibling
@@ -53,8 +58,8 @@ What remains here is what is genuinely about this title:
 tstorecomp/
 ├── androidrecomp/          # submodule -- loader, shims, window, tools
 ├── server/                 # submodule -- self-hosted server + town modifiers
-├── contract/bgcore.txt     # the 14 JNI entry points the host drives
-├── docs/
+├── contract/bgcore.txt     # the 15 JNI entry points the host drives
+├── docs/                  # architecture, triage, the screenshot
 │   ├── ARCHITECTURE.md
 │   └── triage-libscorpio-arm64.md
 └── CMakeLists.txt
@@ -144,18 +149,19 @@ Getting there turned on a few findings worth keeping:
 
 - [x] **M0 — Triage.** Measure the target.
 - [x] **M1 — Loader.** Map, relocate, bind, protect; verify the host contract.
-- [ ] **M2 — Shim + window.** **770 of 776 imports resolved**, and an SDL2 window
-      with a live GL context. Left: the JNI bridge — a `JNIEnv` the engine can
-      call back through, plus input translation — and audio.
+- [x] **M2 — Shim + window.** **770 of 776 imports resolved**, an SDL2
+      window with a live GL context, and a JNI bridge the engine calls back
+      through. `--loop` renders, presents and forwards mouse events as touch.
+      Left: audio.
 - [x] **M3 — Lifter.** ARM64 → C. **99.94% of instructions**, across 70,688
       functions in three images — the engine and the C++ runtime the APK ships
       beside it, because a call into that runtime lands in ARM code like any
       other. Boundaries come from `.eh_frame`, the PLT, call sites and the gaps
       between them, which between them leave *no* undescribed call target
       standing in as a stub. Verified against Unicorn rather than arm64
-      hardware. `arc_boot` runs 1,521 of 1,527 static constructors with no
-      traps left; what remains is six null dereferences, which are missing
-      initialisation rather than missing code.
+      hardware. `arc_boot` runs all 1,527 static constructors with no traps
+      and no faults; the last three needed libNimble's `JNI_OnLoad` called
+      before them, which is what Android does and the kit now does too.
 - [ ] **M4 — x86-64.** Windows first, Linux and macOS from the same C.
 
 On an arm64 host — Apple Silicon, Windows-on-ARM, arm64 Linux — M2 is the last
