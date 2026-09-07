@@ -1,7 +1,7 @@
 # tstorecomp
 
 > *The Simpsons: Tapped Out* as a native cross-platform desktop application —
-> with the server and the town modifiers built into the app, not bolted on
+> with the server built into the app as a loopback sidecar, not bolted on
 > beside it.
 
 ![The Simpsons: Tapped Out, lifted to C and rendering on Windows](docs/images/tsto-splash.png)
@@ -39,10 +39,9 @@ desktop host, satisfy the library's small POSIX/OpenGL import surface, and lift
 the ARM64 code to C for machines that are not ARM.
 
 It is also more than a port. EA's servers went dark in January 2025, so the
-client needs one regardless; folding a local server and the town-editing tools
-*into the binary* is the difference between a technical exercise and something
-worth running. The goal is a single desktop app that boots into your Springfield
-with the modifiers already there.
+client needs one regardless; folding a local server *into the binary* is the
+difference between a technical exercise and something worth running. The goal is
+a single desktop app that boots into your Springfield.
 
 ## This repo is the thin half
 
@@ -57,7 +56,7 @@ What remains here is what is genuinely about this title:
 ```
 tstorecomp/
 ├── androidrecomp/          # submodule -- loader, shims, window, tools
-├── server/                 # submodule -- self-hosted server + town modifiers
+├── server/                 # submodule -- the loopback sidecar server
 ├── contract/bgcore.txt     # the 15 JNI entry points the host drives
 ├── docs/                  # architecture, triage, the screenshot
 │   ├── ARCHITECTURE.md
@@ -168,7 +167,7 @@ On an arm64 host — Apple Silicon, Windows-on-ARM, arm64 Linux — M2 is the la
 milestone before the game runs: the engine's instructions execute natively, so
 finishing the shim and the bridge is enough, with no lifting involved.
 
-## Server and town modifiers
+## The server
 
 The app should not need a container, a LAN, or anything outside the process. The
 game speaks plain HTTP to a configurable base URL, so the server runs **inside
@@ -183,9 +182,12 @@ at all, so its code cannot be vendored into an MIT repository or linked into an
 MIT binary. A submodule references it without redistributing it, and a separate
 process is not a derivative work.
 
-`server/` points at [`sp00nznet/tsto-springfield`](https://github.com/sp00nznet/tsto-springfield),
-our fork with the boot-loop and persistence fixes. It is private for now and
-will need to be public before this repository is.
+`server/` points at
+[`sp00nznet/tsto-springfield`](https://github.com/sp00nznet/tsto-springfield),
+our fork with the boot-loop and persistence fixes. It used to serve an isometric
+web view of your town as well; that is gone, because the client draws
+Springfield itself now, from the same art, at the frame rate the engine draws it
+at. What is left there is protocol and configuration.
 
 On Android the server URL has to be patched into `libscorpio.so` by hash and
 offset. In a native build it is just a config value — which also removes the
