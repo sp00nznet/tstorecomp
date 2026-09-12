@@ -1,0 +1,154 @@
+@echo off
+rem Boot The Simpsons: Tapped Out against the loopback sidecar and run it.
+rem
+rem Published as an example because the boot order is the hard-won part and
+rem a README cannot be run. Set the two paths below and it works as-is; the
+rem comments explain why each step is there, because none of them are
+rem optional. Start the sidecar first: python tsto_server.py in server/.
+rem
+rem   ARC_ROOT  the androidrecomp checkout holding build-lifted\arc_boot.exe
+rem   WORK      the extracted APK: work\assets and work\lib\arm64-v8a
+rem
+rem The order is Android's, and none of it is optional:
+rem   * the GL surface exists before the game boots, because the game's boot
+rem     allocates out of the renderer's heap;
+rem   * ScorpioJNI_init is the game's boot -- it builds the application and
+rem     installs its first state;
+rem   * the activity lifecycle (onCreate, onStart, onResume) follows, and
+rem     LifecycleStart takes a boolean that must be true. False means "the
+rem     language did not change and this is not a fresh start", and the engine
+rem     then never initialises its font system.
+rem
+rem The tap at frame 70 is the one the player would make: the title parks in
+rem FrontEndState_TapToContinue with the account-select menu up and waits for
+rem input that nothing here provides. One press and release anywhere sends it
+rem on to LoadGameTaskList, GameState and the town.
+rem
+rem 0x12c89dc is the font and menu registry's initialiser, and it has to be
+rem kicked by hand because nothing else will do it in time. Its own caller is a
+rem one-shot that fires during ScorpioJNI_init and bails there, clearing its own
+rem flag on the way out, so the chance never comes again.
+rem
+rem The 0x17dd654 / 0x17dd934 calls are the Nimble SDK's component lifecycle --
+rem restore() and resume(), which on Android are driven by the Java half of the
+rem SDK that this port does not have. Without them the Nexus service never
+rem leaves status Unknown, which the title reports as "Unknown NimbleNexus
+rem error" and turns into its own error screen. --args=self: names which
+rem component the call is about, because the native side asks Java that rather
+rem than being told.
+if not defined ARC_ROOT set ARC_ROOT=G:\recomp\androidrecomp
+if not defined WORK set WORK=G:\recomp\tstorecomp\work
+cd /d %ARC_ROOT%
+set B=Java_com_bight_android_jni_BGCoreJNIBridge
+set J=Java_com_ea_simpsons_ScorpioJNI
+set N=com.ea.nimble.cpp
+
+rem Where the sidecar is. ARC_SERVER is what the engine is told to use; the
+rem redirect catches the addresses it was built with and never asks us about.
+set ARC_SERVER=http://127.0.0.1:9000
+set ARC_SERVER_REDIRECT=127.0.0.1:9000
+
+rem The version the title claims to be. Not cosmetic: the DLC index lists one
+rem entry per client version, and 1.0.0 selects none of them.
+set ARC_APP_VERSION=4.69.0
+
+rem The EA identity the sidecar validates against.
+set ARC_JNI_getSellId=857120
+set ARC_JNI_getNexusClientId=simpsons4-android-client
+set ARC_JNI_getNexusClientSecret=D0fpQvaBKmAgBRCwGPvROmBf96zHnAuZmNepQht44SgyhbCdCfFgtUTdCezpWpbRI8N6oPtb38aOVg2y
+
+rem Device identity, which a host has to invent once and then keep. These are
+rem defaults; anything the title writes down goes to work\assets\prefs.txt and
+rem is read back from there on the next run.
+set ARC_PREF_androidId=a1b2c3d4e5f60718
+set ARC_PREF_platform=android
+set ARC_PREF_systemVersion=9
+set ARC_PREF_ServerEnvironment=prod
+set ARC_PREF_MHClientVersion=4.69.0
+set ARC_PREF_ServerAPIVersion=1.0.0
+set ARC_PREF_Region=US
+set ARC_PREF_SubPlatform=android
+
+rem How long to wait before retrying a request. Unanswered this reads as zero,
+rem and the title retries with no delay at all: about a thousand requests a
+rem second, each one a curl handle and two threads it never stops. Twenty
+rem thousand threads later the machine stops responding -- not the port, the
+rem machine. With a real number here the same boot makes eighteen threads.
+set ARC_PREF_NetworkRetryTimerMS=5000
+
+rem Each of the four knobs below changes what the engine does, not just what it
+rem reports, so each one is a suspect whenever the port and a real device
+rem disagree. Setting the matching ARC_NO_* leaves that one off for a run,
+rem which is how you find out which hack is answering a question wrongly.
+
+rem Do not recycle freed memory.
+rem
+rem The engine mounts every installed DLC pack in turn -- open <pack>/0, read
+rem the index, close it -- and a stream it cached from an earlier pack still
+rem holds a raw pointer to the archive stream that close destroyed. A thousand
+rem installed packs make the walk long enough that the cached entry is used
+rem again afterwards, and reading through it is a fault about forty frames in.
+rem
+rem Not recycling is not a fix for that; it is what makes the rest of the boot
+rem reachable while the lifetime is still wrong, and the run gets as far as
+rem LoadGameTaskList with it. The memory cost is a few hundred megabytes over
+rem a boot, which is affordable exactly once.
+if not defined ARC_NO_LEAK_FREE set ARC_LEAK_FREE=1
+
+rem Hand back zeroed memory.
+rem
+rem Bionic grows its heap by mapping pages and a fresh page is zero, so a game
+rem that only ever loads content sees zeroed memory from most of its
+rem allocations and can depend on that without anyone noticing. This heap hands
+rem back whatever the last owner left, and the difference reads as a wild
+rem pointer rather than a null one -- which is the difference between a fault
+rem report that names a field and one that names nothing.
+if not defined ARC_NO_ZERO_HEAP set ARC_ZERO_HEAP=1
+
+rem Answer a pure virtual call instead of aborting on it.
+rem
+rem Eighteen of the 1525 entries in the engine's consumable registry have had
+rem their derived destructor run and still sit in the list. Looking a consumable
+rem up by name walks that list calling getName() on every entry, so it reaches
+rem one of the dead ones and libc++ aborts. Answering with an empty string
+rem makes the caller's strcmp miss and move on, and the entry it wants is still
+rem there. The lifetime is still wrong; this is what makes the rest reachable.
+if not defined ARC_NO_PURE_VIRTUAL set ARC_PURE_VIRTUAL=skip
+
+rem There is no Java billing service here, so say so.
+rem
+rem FetchMTXItems asks Java for retrieveSkuInformation and, given an id for it,
+rem builds a store request out of a catalogue nothing filled -- reading an id
+rem out of an item that has none. Given no id it returns immediately, which is
+rem the path a device without billing takes and the one that matters here: the
+rem store is not on the way into the town.
+if not defined ARC_NO_JNI_ABSENT set ARC_JNI_ABSENT=retrieveSkuInformation
+
+build-lifted\arc_boot.exe --window --loop --assets=%WORK%\assets ^
+ --entry=%B%_init --args=obj ^
+ --entry=%B%_OGLESInit --args=1280,720 ^
+ --entry=%B%_OGLESResize --args=1280,720 ^
+ --entry=%J%_init --args=str:%WORK% ^
+ --entry=%J%_LifecycleOnCreate ^
+ --entry=%J%_LifecycleStart --args=1 ^
+ --entry=%J%_LifecycleResume ^
+ --entry=%B%_resume ^
+ --entry=0x12c89dc ^
+ --entry=0x17dd654 --args=self:%N%.tracking.applifecycleeventlogger ^
+ --entry=0x17dd654 --args=self:%N%.tracker.pin ^
+ --entry=0x17dd654 --args=self:%N%.trackingservice ^
+ --entry=0x17dd654 --args=self:%N%.nexus.socialsharing ^
+ --entry=0x17dd654 --args=self:%N%.authenticator.anonymous ^
+ --entry=0x17dd654 --args=self:%N%.nexus.eaaccount ^
+ --entry=0x17dd654 --args=self:%N%.nexusservice ^
+ --entry=0x17dd654 --args=self:%N%.networkclientmanager ^
+ --entry=0x17dd654 --args=self:%N%.networkservice ^
+ --entry=0x17dd654 --args=self:%N%.agecomplianceservice ^
+ --entry=0x17dd934 --args=self:%N%.networkservice ^
+ --entry=0x17dd934 --args=self:%N%.networkclientmanager ^
+ --entry=0x17dd934 --args=self:%N%.nexusservice ^
+ --entry=0x17dd934 --args=self:%N%.authenticator.anonymous ^
+ --entry=0x17dd934 --args=self:%N%.trackingservice ^
+ --entry=%B%_pointerPressed  --args=640,360,0 --entry-at=frame:70 ^
+ --entry=%B%_pointerReleased --args=640,360,0 --entry-at=frame:72 ^
+ %WORK%\lib\arm64-v8a\libscorpio.so %*

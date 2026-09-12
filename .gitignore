@@ -69,3 +69,8 @@ triage.md
 # Local launchers: one machine's paths, not part of the port.
 build.bat
 run-*.bat
+
+# Local caches and backups: the CDN mirror we pull packs from, and copies of
+# saves taken before an experiment. Both are game content and both are large.
+dlc-cache/
+save-backup-*/
